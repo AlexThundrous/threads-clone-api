@@ -232,7 +232,7 @@ app.post('/post', async (req, res) => {
       { new: true }
     );
     console.log(updatedUser);
-    return res.status(201).json({ message: 'Post added successfully', user: updatedUser });
+    return res.status(201).json({ message: 'Post added successfully', user: user });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Server error' });
@@ -259,6 +259,13 @@ app.post('/reply', async (req, res) => {
       return res.status(404).json({ message: 'Thread not found.' });
     }
 
+    console.log(user.threads)
+    
+    if (!user.threads[threadIndex].replies) {
+      user.threads[threadIndex].replies = [];
+    }
+
+    
     const newReply = {
       id: user.threads[threadIndex].replies.length,
       content: content,
@@ -271,9 +278,23 @@ app.post('/reply', async (req, res) => {
 
     user.threads[threadIndex].replies.push(newReply);
 
-    const updatedUser = await user.save();
-
-    return res.status(201).json({ message: 'Reply added successfully', user: updatedUser });
+    const updatedUser = await database.updateOne(
+      { googleId },
+      {
+        $push: {
+          'threads.$[thread].replies': newReply
+        }
+      },
+      {
+        arrayFilters: [{ 'thread.id': threadId }],
+      }
+    );
+     
+    if (updatedUser.matchedCount === 0) {
+      return res.status(404).json({ message: 'User not found or thread not found' });
+    }
+   
+    return res.status(201).json({ message: 'Reply added successfully', user: user });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Server error' });
@@ -334,19 +355,23 @@ app.delete('/thread/:username/:threadId/:replyId', async (req, res) => {
       return res.status(404).json({ message: 'Thread not found' });
     }
 
-    const replyIndex = user.threads.replies.findIndex(reply => reply.id === parseInt(replyId));
-
-    // Remove the thread from the user's threads array
-    user.threads.replies.splice(replyIndex, 1);
-
-    // Update the user in the database
-    const updatedUser = await database.findOneAndUpdate(
+    const updateResult = await database.updateOne(
       { username },
-      { $set: { threads: user.threads } },
-      { new: true }
+      {
+        $pull: {
+          'threads.$[thread].replies': { id: parseInt(replyId) }
+        }
+      },
+      {
+        arrayFilters: [{ 'thread.id': parseInt(threadId) }],
+      }
     );
 
-    return res.status(200).json({ message: 'Thread deleted successfully', user: updatedUser });
+    if (updateResult.matchedCount === 0) {
+      return res.status(404).json({ message: 'User not found or thread not found' });
+    }
+    
+    return res.status(200).json({ message: 'Thread deleted successfully', user: user });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Server error' });
